@@ -1,0 +1,456 @@
+---
+title: "Short-Term Rentals (STR) in Cambridge, MA"
+output: 
+  flexdashboard::flex_dashboard:
+    theme: spacelab
+    source_code: embed
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(plyr)
+library(flexdashboard)
+library(shinyWidgets)
+library(shiny)
+library(tidyverse)
+library(janitor)
+library(magrittr)
+library(leaflet)
+library(DT)
+library(plotly)
+library(shinydashboard)
+library(knitr)
+library(htmltools)
+```
+
+```{r global, include = FALSE}
+url = "https://data.cambridgema.gov/resource/wxgv-w968.csv?$query=SELECT%0A%20%20%60recordid%60%2C%0A%20%20%60issue_date%60%2C%0A%20%20%60status%60%2C%0A%20%20%60location%60%2C%0A%20%20%60latitude%60%2C%0A%20%20%60longitude%60%2C%0A%20%20%60please_select_the_appropriate_str_type%60%2C%0A%20%20%60type_of_property%60%2C%0A%20%20%60please_explain_below%60%2C%0A%20%20%60is_the_short_term_rental_unit_part_of_a_condominium_association%60%2C%0A%20%20%60total_number_of_legal_bedrooms_in_the_short_term_rental_unit%60%2C%0A%20%20%60number_of_legal_bedrooms_to_be_rented_as_part_of_this_application%60%2C%0A%20%20%60maximum_number_or_people_to_which_the_short_term_rental_will_be_rented%60%2C%0A%20%20%60will_the_kitchen_be_available_to_the_renter%60%2C%0A%20%20%60number_of_bathrooms_available_to_the_renter%60%2C%0A%20%20%60airbnb%60%2C%0A%20%20%60homeaway%60%2C%0A%20%20%60flipkey%60%2C%0A%20%20%60vrbo%60%2C%0A%20%20%60craigslist%60%2C%0A%20%20%60couch_surfing%60%2C%0A%20%20%60boston_rentals%60%2C%0A%20%20%60other%60%2C%0A%20%20%60please_list_additional_hosting_platforms%60%2C%0A%20%20%60all_rental_services%60%2C%0A%20%20%60%3A%40computed_region_guic_hr4a%60%2C%0A%20%20%60%3A%40computed_region_v7jj_366k%60%2C%0A%20%20%60%3A%40computed_region_e4yd_rwk4%60%2C%0A%20%20%60%3A%40computed_region_swkg_bavi%60%2C%0A%20%20%60%3A%40computed_region_rffn_qbt6%60%2C%0A%20%20%60%3A%40computed_region_rcj3_ccgu%60"
+
+data <- read_csv(url)
+colnames <- c("id", "issue_date", "status", "location", "lat", "lon", "str_type", "property_type", "property_type_desc", "condo", "total_bedrooms", "rented_bedrooms", "max_renter_cap", "kitchen", "bathrooms", "airbnb", "homeaway", "flipkey", "vrbo", "craigslist", "couch_surfing", "boston_rentals", "other", "other_plat_desc", "all_rental_serv", "police_nei_regions", "police_res_districts", "census_blocks_2010", "cdd_zoning", "neighborhoods", "zipcode")
+property_type_from <- c("Single-family detached dwelling","Two-family dwelling","Three-family structure", "Multi-family dwelling of four units or less, all of which are owned by the operator", "Other")
+property_type_to <- c("Single-family","Two-family","Three-family", "Multi-family", "Other")
+
+df <- data %>%
+  set_colnames(colnames) %>%
+  mutate(issue_date = as.Date(issue_date),
+         str_type = str_to_sentence(gsub("^.*an\\s+(.*)\\s+short-term.*$", "\\1", str_type)),
+         property_type = factor(mapvalues(property_type, from=property_type_from, to=property_type_to),    levels = property_type_to),
+         address = gsub("Cambridge,.*$", "", location),
+         zipcode = if_else(str_length(gsub("^.*MA\\s+(\\w+).*", "\\1", location)) == 5,   gsub("^.*MA\\s+(\\w+).*", "\\1", location), "02139"), 
+         airbnb = ifelse(is.na(airbnb), FALSE, airbnb),
+         homeaway = ifelse(is.na(homeaway), FALSE, homeaway),
+         flipkey = ifelse(is.na(flipkey), FALSE, flipkey),
+         vrbo = ifelse(is.na(vrbo), FALSE, vrbo),
+         craigslist = ifelse(is.na(craigslist), FALSE, craigslist),
+         couch_surfing = ifelse(is.na(couch_surfing), FALSE, couch_surfing),
+         boston_rentals = ifelse(is.na(boston_rentals), FALSE, boston_rentals)
+         ) %>%
+  select(-status, -all_rental_serv, -property_type_desc, -other, -other_plat_desc, -neighborhoods, -police_nei_regions, -police_res_districts, -census_blocks_2010, -cdd_zoning, -location) %>%
+  clean_names()
+zipcode_list <- sort(unique(df$zipcode))
+str_type_list <- sort(unique(df$str_type))
+property_type_list <- sort(unique(df$property_type))
+total_bedrooms_list <- sort(unique(df$total_bedrooms))
+rented_bedrooms_list <- sort(unique(df$rented_bedrooms))
+max_renter_cap_list <- sort(unique(df$max_renter_cap))
+bathrooms_list <- sort(unique(df$bathrooms))
+```
+
+
+
+# Home Page {data-icon="ion-home"}
+
+```{r}
+h2("Short-Term Rentals (STR) in Cambridge, MA", style = "text-align:center; font-weight:bold;")
+h5("STR are rentals of any dwelling unit of bedroom as residential accommodation for a duration of less than 30 consecutive days.", style = "text-align:center;")
+h5("Explore the characteristics of the STR in Cambridge with this dashboard and gain insights of their spatial distribution and characteristics!", style = "text-align:center;")
+```
+
+## Column {.data-width=650}
+
+```{r include_image, echo=FALSE}
+img_file <- "house_cambridge.jpg"
+img_div <- div(
+  style = "display:flex; justify-content:center;",
+  img(src = img_file, style = "max-width:100%; opacity:0.5;")
+)
+img_div
+```
+
+
+```{r}
+actionButton("show_popup1", "Spatial distribution", style = "position: absolute; top: 35%; left: 10%; width: 275px")
+actionButton("show_popup2", "Statistical analysis", style = "position: absolute; top: 55%; left: 10%; width: 275px")
+actionButton("show_popup3", "About", style = "position: absolute; top: 75%; left: 10%; width: 275px")
+
+observeEvent(input$show_popup1, {
+  showModal(modalDialog(
+    title = "Spatial distribution",
+    p("In this section, you can explore the spatial distribution of the Short-Term Rentals and use filters of your choice such as zipcode, STR type, property type, services listed, etc. Also, you can interact with the map, click on the icons, and learn the detailed characteristics of the STRs."),
+    footer = modalButton("Close")
+  ))
+})
+
+observeEvent(input$show_popup2, {
+  showModal(modalDialog(
+    title = "Statistical analysis",
+    p("In this section, you can perform a boxplot analysis of the Short-Term Rentals with some inputs of your choice. You can explore the distribution of a variable of interest grouped by another variable and   gain insights about the number of bedrooms, bathrooms, maximum rented capacity and more."),
+    footer = modalButton("Close")
+  ))
+})
+
+observeEvent(input$show_popup3, {
+  showModal(modalDialog(
+    title = "About",
+    p("In this section, you can learn more about the definitions of the variables, explore the data source and learn more about the developers behind this dashboard."),
+    footer = modalButton("Close")
+  ))
+})
+```
+
+
+
+
+# Spatial distribution {data-icon="ion-earth"}
+
+## Inputs {.sidebar data-width="300"}
+
+```{r}
+pickerInput("zipcode",
+            label = "Select zipcodes",
+            choices = zipcode_list,
+            selected = zipcode_list, 
+            options = list(`actions-box` = TRUE),
+          multiple = TRUE)
+pickerInput("str_type",
+            label = "Select Short-Term Rental types",
+            choices = str_type_list,
+            selected = str_type_list[1], 
+            options = list(`actions-box` = TRUE,
+                           `selected-text-format` = "count > 2"),
+            multiple = TRUE)
+pickerInput("property_type",
+            label = "Select property types",
+            choices = property_type_to,
+            selected = property_type_to[1], 
+            options = list(`actions-box` = TRUE,
+                           `selected-text-format` = "count > 2"),
+            multiple = TRUE)
+sliderInput("rented_bedrooms", "Select number of rented bedrooms",
+                  min = min(rented_bedrooms_list), 
+                  max = max(rented_bedrooms_list),
+                  value = c(min(rented_bedrooms_list),max(rented_bedrooms_list)),
+                  sep = "")
+sliderInput("max_renter_cap", "Select maximum renter capacity",
+                  min = min(max_renter_cap_list), 
+                  max = max(max_renter_cap_list),
+                  value = c(min(max_renter_cap_list),max(max_renter_cap_list)),
+                  sep = "")
+sliderInput("bathrooms", "Select number of bathrooms",
+                  min = min(bathrooms_list), 
+                  max = max(bathrooms_list),
+                  value = c(min(bathrooms_list),max(bathrooms_list)),
+                  sep = "")
+
+h5("Listed on any of these services")
+checkboxInput("airbnb", "Airbnb", value = TRUE)
+checkboxInput("homeaway", "HomeAway", value = TRUE)
+checkboxInput("flipkey", "FlipKey", value = TRUE)
+checkboxInput("vrbo", "VRBO", value = TRUE)
+checkboxInput("craigslist", "Craigslist", value = TRUE)
+actionButton("update1", "Update")
+```
+
+## Column
+
+### Map of selected Short-Term Rentals
+
+```{r}
+content <- paste("<b>","ID:","</b>",df$id,"</br>",
+                 "<b>","Address:","</b>",df$address,"</br>",
+                 "<b>","Zipcode:","</b>",df$zipcode,"</br>",
+                 "------------------------------------------------------","</br>",
+                 "<b>","STR type:","</b>",df$str_type,"</br>",
+                 "<b>","Property type:","</b>",df$property_type,"</br>",
+                 "<b>","Total bedrooms:","</b>",df$total_bedrooms,"</br>",
+                 "<b>","Rented bedrooms:","</b>",df$rented_bedrooms,"</br>",
+                 "<b>","Max renter capacity:","</b>",df$max_renter_cap,"</br>",
+                 "<b>","Bathrooms:","</b>", df$bathrooms,"</br>",
+                 "<b>","Kitchen:","</b>", df$kitchen,"</br>",
+                 "<b>","Part of condominium association:","</b>", df$condo,"</br>",
+                 "<b>","STR certificate issue date:","</b>", df$issue_date
+                 )
+df_map1 = eventReactive(input$update1, {
+    
+    df_blank = df %>% filter(id=="dummy")
+    df_airbnb =   df_homeaway = df_flipkey = df_vrbo = df_craiglist = NULL
+    if (input$airbnb == TRUE) {df_airbnb <- df %>% filter(airbnb==TRUE)}
+    if (input$homeaway == TRUE) {df_homeaway <- df %>% filter(homeaway==TRUE)}
+    if (input$flipkey == TRUE) {df_flipkey <- df %>% filter(flipkey==TRUE)}
+    if (input$vrbo == TRUE) {df_vrbo <- df %>% filter(vrbo==TRUE)}
+    if (input$craigslist == TRUE) {df_craiglist <- df %>% filter(craigslist==TRUE)}
+    df <- unique(bind_rows(df_blank, df_airbnb, df_homeaway, df_flipkey, df_vrbo, df_craiglist)) %>%
+      filter(zipcode %in% input$zipcode,
+             str_type %in% input$str_type,
+             property_type %in% input$property_type,
+             between(rented_bedrooms, input$rented_bedrooms[1], input$rented_bedrooms[2]),
+             between(max_renter_cap, input$max_renter_cap[1], input$max_renter_cap[2]),
+             between(bathrooms, input$bathrooms[1], input$bathrooms[2]))
+  })
+greenLeafIcon <- makeIcon(
+  iconUrl = "house_icon.png",
+  iconWidth = 15, iconHeight = 15)
+renderLeaflet({
+leaflet(options =leafletOptions(minZoom =11,maxZoom =16)) %>%
+  setView(lng = -71.1, lat =42.38, zoom =12) %>%
+  addTiles() %>%
+  addMarkers(lng = ~lon,
+             lat = ~lat,
+             data = df_map1(),
+             popup = content, 
+             icon = greenLeafIcon) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addMiniMap()
+})
+```
+
+## Column
+
+### Information of selected Short-Term Rentals
+
+```{r}
+table_colnames <- c("Address", "Zipcode", "STR Type", "Property Type", "Total Bedrooms", "Rented Bedrooms", "Max. Renter Capacity", "Bathrooms", "Kitchen", "Condominium Association")
+df_table1 <- eventReactive(input$update1, {
+    df_blank = df %>% filter(id=="dummy")
+    df_airbnb =   df_homeaway = df_flipkey = df_vrbo = df_craiglist = NULL
+    if (input$airbnb == TRUE) {df_airbnb <- df %>% filter(airbnb==TRUE)}
+    if (input$homeaway == TRUE) {df_homeaway <- df %>% filter(homeaway==TRUE)}
+    if (input$flipkey == TRUE) {df_flipkey <- df %>% filter(flipkey==TRUE)}
+    if (input$vrbo == TRUE) {df_vrbo <- df %>% filter(vrbo==TRUE)}
+    if (input$craigslist == TRUE) {df_craiglist <- df %>% filter(craigslist==TRUE)}
+    df <- unique(bind_rows(df_blank, df_airbnb, df_homeaway, df_flipkey, df_vrbo, df_craiglist)) %>%
+      filter(zipcode %in% input$zipcode,
+             str_type %in% input$str_type,
+             property_type %in% input$property_type,
+             between(rented_bedrooms, input$rented_bedrooms[1], input$rented_bedrooms[2]),
+             between(max_renter_cap, input$max_renter_cap[1], input$max_renter_cap[2]),
+             between(bathrooms, input$bathrooms[1], input$bathrooms[2])) %>%
+      select(address, zipcode, str_type, property_type, total_bedrooms, rented_bedrooms, max_renter_cap, bathrooms, kitchen, condo) %>%
+    set_colnames(table_colnames)
+  })
+  
+renderDT({
+    datatable(df_table1(), 
+            extensions = 'Buttons', 
+            options = list(
+              dom = 'Bfrtip',
+              buttons = list(
+                'copy', 'print', list(
+                  extend = 'collection',
+                  buttons = c('csv', 'excel', 'pdf'),
+                  text = 'Download'
+                )),
+              paging = FALSE,
+              searching = TRUE,
+              orderClasses = TRUE
+            )
+  )
+})
+```
+
+# Statistical analysis {data-icon="ion-stats-bars"}
+
+## Inputs {.sidebar data-width="300"}
+
+```{r}
+quant_vars <- c("total_bedrooms", "rented_bedrooms", "max_renter_cap", "bathrooms")
+qual_vars <- c("zipcode", "str_type", "property_type", "kitchen", "condo", "airbnb", "flipkey", "vrbo", "craigslist")
+h5(HTML("<b>Parameters for boxplot</b>"))
+pickerInput("y",
+             label = "Select variable of interest",
+             choices = quant_vars,
+             selected = quant_vars[1], 
+             multiple = FALSE)
+pickerInput("x",
+            label = "Select grouping variable",
+             choices = qual_vars,
+             selected = qual_vars[1], 
+            multiple = FALSE)
+h5(HTML("<b>Filters</b>"))
+pickerInput("zipcode2",
+            label = "Select zipcodes",
+            choices = zipcode_list,
+            selected = zipcode_list, 
+            options = list(`actions-box` = TRUE),
+          multiple = TRUE)
+pickerInput("str_type2",
+            label = "Select Short-Term Rental types",
+            choices = str_type_list,
+            selected = str_type_list[1], 
+            options = list(`actions-box` = TRUE,
+                           `selected-text-format` = "count > 2"),
+          multiple = TRUE)
+pickerInput("property_type2",
+            label = "Select property types",
+            choices = property_type_to,
+            selected = property_type_to[1], 
+            options = list(`actions-box` = TRUE,
+                           `selected-text-format` = "count > 2"),
+          multiple = TRUE)
+actionButton("update2", "Update")
+```
+
+## Column
+
+### Boxplot analysis
+
+```{r}
+
+df_boxplot = eventReactive(input$update2, {
+  df %>% 
+    filter(zipcode %in% input$zipcode2,
+             str_type %in% input$str_type2,
+             property_type %in% input$property_type2) %>%
+    mutate(x = .data[[input$x]],
+           y = .data[[input$y]])
+})
+x <- eventReactive(input$update2, input$x)
+y <- eventReactive(input$update2, input$y)
+renderPlotly({
+p1 <- ggplotly(
+  ggplot(data = df_boxplot(), mapping = aes(x = x, y = y)) +
+  geom_boxplot(aes(fill = x)) +  
+  geom_jitter(width=0.15, height=0.1, alpha = 0.5) +
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  theme_bw() +
+  theme(legend.position="none") +
+  labs(x = x(),
+       y = y())
+)
+  })
+
+```
+
+```{r}
+df_boxplot = eventReactive(input$update2, {
+  df %>% 
+    filter(zipcode %in% input$zipcode2,
+             str_type %in% input$str_type2,
+             property_type %in% input$property_type2) %>%
+    mutate(x = .data[[input$x]],
+           y = .data[[input$y]])
+})
+  
+x <- eventReactive(input$update2, input$x)
+y <- eventReactive(input$update2, input$y)
+renderPlotly({
+ggplotly(
+  ggplot(data = df_boxplot(), mapping = aes(x = x, y = y)) +
+  geom_boxplot() +
+  geom_jitter(width=0.2, height=0.1) +
+  labs(x = x(),
+       y = y())
+)
+  })
+```
+
+## Column
+
+### Information of selected Short-Term Rentals
+
+```{r}
+table_colnames <- c("Address", "Zipcode", "STR Type", "Property Type", "Total Bedrooms", "Rented Bedrooms", "Max. Renter Capacity", "Bathrooms", "Kitchen", "Condominium Association")
+df_table2 <- eventReactive(input$update2, {
+    df %>%
+      filter(zipcode %in% input$zipcode2,
+             str_type %in% input$str_type2,
+             property_type %in% input$property_type2) %>%
+      select(address, zipcode, str_type, property_type, total_bedrooms, rented_bedrooms, max_renter_cap, bathrooms, kitchen, condo) %>%
+    set_colnames(table_colnames)
+  })
+  
+renderDT({
+    datatable(df_table2(), 
+            extensions = 'Buttons', 
+            options = list(
+              dom = 'Bfrtip',
+              buttons = list(
+                'copy', 'print', list(
+                  extend = 'collection',
+                  buttons = c('csv', 'excel', 'pdf'),
+                  text = 'Download'
+                )),
+              paging = FALSE,
+              searching = TRUE,
+              orderClasses = TRUE))
+  })
+```
+
+# About {data-orientation="rows" data-icon="fa-info-circle"}
+
+### **DATA DICTIONARY**
+
+The dataset can be found [here](https://data.cambridgema.gov/Inspectional-Services/Short-Term-Rentals/wxgv-w968/explore/).
+
+The official data dictionary can be found [here](https://data.cambridgema.gov/Inspectional-Services/Short-Term-Rentals/wxgv-w968).
+
+| Column Name                 | Description                                                            |
+|---------------------|---------------------------------------------------|
+| **ID**                      | Rental ID Number                                                       |
+| **Issue Date**              | Date of Issue for the Short Term Rental certificate                    |
+| **Address**                 | Address of the STR                                                     |
+| **Latitude**                | Latitude of the location                                               |
+| **Longitude**               | Longitude of the location                                              |
+| **Zipcode**                 | Zipcode of the location                                                |
+| **STR Type**                | Response to form question: "Please select the appropriate STR type"    |
+| **Property Type**           | Description of the building property type                              |
+| **Condominium Association** | Is the Short-Term Rental Unit part of a condominium association?       |
+| **Total Bedrooms**          | Total number of legal bedrooms in the short-term rental unit           |
+| **Rented Bedrooms**         | Number of legal bedrooms to be rented as part of this application      |
+| **Maximum Renter Capacity** | Maximum number of people to which the short term rental will be rented |
+| **Kitchen**                 | Will the kitchen be available to the renter?                           |
+| **Bathrooms**               | Number of bathrooms available to the renter                            |
+| **Airbnb**                  | Whether the rental is listed on this service                           |
+| **HomeAway**                | Whether the rental is listed on this service                           |
+| **FlipKey**                 | Whether the rental is listed on this service                           |
+| **VRBO**                    | Whether the rental is listed on this service                           |
+| **Craigslist**              | Whether the rental is listed on this service                           |
+| **Couch Surfing**           | Whether the rental is listed on this service                           |
+| **Boston Rentals**          | Whether the rental is listed on this service                           |
+
+### **META INFORMATION**
+
+**Title:** Short-term rentals in Cambridge
+
+**Summary:**\
+This dataset is part of the **Cambridge's Open Data Program**. It contains information about Short-term rentals (STR) in Cambridge, Massachusetts. STR refers to the rental of any dwelling unit of bedroom as residential accommodation for a duration of less than 30 consecutive days.
+
+Use cases of this dataset include providing valuable insights into the short-term rental market in Cambridge, like understanding the distribution, density and characteristics of STR across Cambridge neighborhoods, which can be useful for a variety of stakeholders, including policymakers, real estate investors, and community organizations.
+
+**Publisher:** [Open Data - City of Cambridge, MA](https://www.cambridgema.gov/departments/opendata)
+
+**Date Created:** April 4, 2018
+
+**Last Updated:** April, 2023
+
+**Data Provided by:** City of Cambridge Inspectional Services Department
+
+**Dataset Owner:** Josh Wolff
+
+**License:** The license for this dataset is unspecified
+
+**Developers:**
+
+-   Michael Sam
+
+-   Joslyn Fu
+
+-   Delina Irgau
+
+| Dashboard version       | Dashboard upload date      |   Version note         |
+|:-----------------------:|:--------------------------:|:----------------------:|
+|1.0.0                    | 03/30/2023                 |   Official release     |
+|0.5.0                    | 04/05/2023                 |  Working draft         |
